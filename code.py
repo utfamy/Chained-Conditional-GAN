@@ -21,17 +21,15 @@ n_class = 10
 X = tf.placeholder(tf.float32, [None, n_input])
 Y = tf.placeholder(tf.float32, [None, n_class])
 
-#X7 = tf.placeholder(tf.float32, [None, n_input])
-#X0 = tf.placeholder(tf.float32, [None, n_input])
-# 노이즈와 실제 이미지에, 그에 해당하는 숫자에 대한 정보를 넣어주기 위해 사용합니다.
-#Y7 = tf.placeholder(tf.float32, [None, n_class])
-#Y0 = tf.placeholder(tf.float32, [None, n_class])
-
+# MNIST 학습 시 사용되는 noise
 Z_y = tf.placeholder(tf.float32, [None, n_noise])
+# 2-hot encoded G2를 학습 시 사용되는 noise
 Z_a = tf.placeholder(tf.float32, [None, n_noise])
+# 2-hot encoded conditional vector
 A = tf.placeholder(tf.float32, [None, n_class])
-#A = np.tile(np.array([0,0,0,0,0,0,0,1,0,1]),(batch_size,1))
 
+
+#2-hot encoded conditional vector 생성 함수
 def get_a(size):
     return np.tile(np.array([[1,1,0,0,0,0,0,0,0,0], [1,0,1,0,0,0,0,0,0,0], [1,0,0,1,0,0,0,0,0,0], [1,0,0,0,1,0,0,0,0,0], [1,0,0,0,0,1,0,0,0,0], [1,0,0,0,0,0,1,0,0,0], [1,0,0,0,0,0,0,1,0,0], [1,0,0,0,0,0,0,0,1,0], [1,0,0,0,0,0,0,0,0,1], 
                              [0,1,1,0,0,0,0,0,0,0], [0,1,0,1,0,0,0,0,0,0], [0,1,0,0,1,0,0,0,0,0], [0,1,0,0,0,1,0,0,0,0], [0,1,0,0,0,0,1,0,0,0], [0,1,0,0,0,0,0,1,0,0], [0,1,0,0,0,0,0,0,1,0], [0,1,0,0,0,0,0,0,0,1], 
@@ -75,6 +73,7 @@ def generator2(noise, labels, reuse=None):
 
     return output
 
+
 def discriminator1(inputs, reuse=None):
     with tf.variable_scope('discriminator1') as scope:
         # 노이즈에서 생성한 이미지와 실제 이미지를 판별하는 모델의 변수를 동일하게 하기 위해,
@@ -82,10 +81,9 @@ def discriminator1(inputs, reuse=None):
         if reuse:
             scope.reuse_variables()
 
-        #inputs = tf.concat([inputs, labels], 1)
-
         hidden = tf.layers.dense(inputs, n_hidden,
                                  activation=tf.nn.relu)
+        #output은 input의 10가지 클래스(0~9)를 구분하도록 1*10 벡터로 지정
         output = tf.layers.dense(hidden, 10,
                                  activation=None)
 
@@ -98,10 +96,9 @@ def discriminator2(inputs, reuse=None):
         if reuse:
             scope.reuse_variables()
 
-        #inputs = tf.concat([inputs, labels], 1)
-
         hidden = tf.layers.dense(inputs, n_hidden,
                                  activation=tf.nn.relu)
+        #output은 input의 10가지 클래스(0~9)를 구분하도록 1*10 벡터로 지정
         output = tf.layers.dense(hidden, 10,
                                  activation=None)
 
@@ -115,20 +112,22 @@ def get_noise(batch_size, n_noise):
 # labels 정보에 해당하는 이미지를 생성할 수 있도록 유도합니다.
 
 
-#phase 1
+#phase 1 - G1이 MNIST data를 학습하도록 훈련
+#D1은 G1과 MNIST data를 구분하고 동시에 MNIST data의 클래스를 판별
 G1_1h = generator1(Z_y, Y)
 
 D1_mn = discriminator1(X)
 D1_g1 = discriminator1(G1_1h, True)
 
-#phase 2
+#phase 2 - G2가 2-hot encoded G1을 학습하도록 훈련 
+#D2는 2-hot encoded G1과 2-hot encoded G2를 구분하고 2-hot encoded G1의 클래스를 판별(2-hot)
 G1_2h = generator1(Z_a, A, True)
 G2_2h = generator2(Z_a, A)
 
 D2_g1 = discriminator2(G1_2h)
 D2_g2 = discriminator2(G2_2h, True)
 
-#phase 3
+#phase 3 - 1-hot encoded G2의 성능 확인
 G2_1h = generator2(Z_y, Y, True)
 D1_g2 = discriminator1(G2_1h, True)
 
@@ -147,11 +146,11 @@ loss_D1_g1 = tf.reduce_mean(
                     tf.nn.sigmoid_cross_entropy_with_logits(
                         logits=D1_g1, labels=tf.zeros_like(D1_g1)))
 
-# loss_D_real 과 loss_D_gene 을 더한 뒤 이 값을 최소화 하도록 최적화합니다.
+# MNIST의 클래스 구분 시 발생한 loss와 G1을 가짜로 판별할 때 생긴 loss를 더한 뒤 이 값을 최소화 하도록 최적화합니다.
 loss_D1 = loss_D1_mn + loss_D1_g1
 
 
-# 가짜 이미지를 진짜에 가깝게 만들도록 생성망을 학습시키기 위해, D_gene 을 최대한 1에 가깝도록 만드는 손실함수입니다.
+# G1을 MNIST에 가깝게 만들도록 학습시키기 위해, D1_g1 을 최대한 1에 가깝도록 만드는 손실함수입니다.
 loss_G1 = tf.reduce_mean(
                     tf.nn.sigmoid_cross_entropy_with_logits(
                         logits=D1_g1, labels=Y))
@@ -165,30 +164,23 @@ loss_D2_g2 = tf.reduce_mean(
                     tf.nn.sigmoid_cross_entropy_with_logits(
                         logits=D2_g2, labels=tf.zeros_like(D2_g2)))
 
+# 2-hot encoded G1의 클래스 구분 시 발생한 loss와 G2를 G1으로 판별할 때 생긴 loss를 더한 뒤 이 값을 최소화 하도록 최적화합니다.
 loss_D2 = loss_D2_g1 + loss_D2_g2 
 
-#loss_G1_2h = tf.reduce_mean(
-#                    tf.nn.sigmoid_cross_entropy_with_logits(
-#                        logits=D2_g1, labels=A))
-
+# 2-hot encoded G2를 2-hot encoded G1에 가깝게 만들도록 학습시키기 위해, D2_g2를 최대한 conditional vector에 가깝도록 만드는 손실함수입니다.
 loss_G2 = tf.reduce_mean(
                     tf.nn.sigmoid_cross_entropy_with_logits(
                         logits=D2_g2, labels=A))
 
 #phase 3
-
-
+# 1-hot encoded G2를 D1에서 판별했을 때 발생하는 loss를 측정합니다.
 loss_D1_phase3 = tf.reduce_mean(
                     tf.nn.sigmoid_cross_entropy_with_logits(
                         logits=D1_g2, labels=Y))
 
-#loss_G2_1h = tf.reduce_mean(
-#                    tf.nn.sigmoid_cross_entropy_with_logits(
-#                        logits=D_gene2, labels=A))
 
 
-# TensorFlow 에서 제공하는 유틸리티 함수를 이용해
-# discriminator 와 generator scope 에서 사용된 변수들을 쉽게 가져올 수 있습니다.
+# discriminator 와 generator scope 에서 사용된 변수들을 가져오기
 vars_D1 = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES,
                            scope='discriminator1')
 vars_D2 = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES,
@@ -198,7 +190,7 @@ vars_G1 = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES,
 vars_G2 = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES,
                            scope='generator2')
 
-
+# 모델 학습
 train_D1 = tf.train.AdamOptimizer().minimize(loss_D1,
                                             var_list=vars_D1)
 train_D2 = tf.train.AdamOptimizer().minimize(loss_D2,
@@ -208,19 +200,17 @@ train_G1 = tf.train.AdamOptimizer().minimize(loss_G1,
 train_G2 = tf.train.AdamOptimizer().minimize(loss_G2,
                                             var_list=vars_G2)
 
-
+# 변수 저장
 saver = tf.train.Saver()
 
-##########
+
 # 신경망 모델 학습
-##########
 sess = tf.Session()
 sess.run(tf.global_variables_initializer())
 
 
-##################
+
 #  변수 불러오기
-##################
 ckpt = tf.train.get_checkpoint_state('./save/')
 if tf.train.checkpoint_exists(ckpt.model_checkpoint_path):
   saver.restore(sess, ckpt.model_checkpoint_path)
@@ -337,29 +327,4 @@ for epoch in range(total_epoch):
         plt.close(fig)
         
         
-        
-        
-        
-
 print('최적화 완료!')
-
-
-
-"""
-sample_size = 10
-noise_y = get_noise(sample_size, n_noise)
-a = get_a(sample_size)
-samples, result = sess.run([G2_1h, D1_g2], feed_dict={Y: a, Z_y: noise_y})
-print('Result: {}'.format(result))
-fig, ax = plt.subplots(2, sample_size, figsize=(sample_size, 2))
-for i in range(sample_size):
-  ax[0][i].set_axis_off()
-  ax[1][i].set_axis_off()
-  
-  ax[0][i].imshow(np.reshape(mnist.test.images[i], (28, 28)))
-  ax[1][i].imshow(np.reshape(samples[i], (28, 28)))
-
-plt.savefig('samples/what.png', bbox_inches='tight')
-plt.close(fig)
-
-"""
